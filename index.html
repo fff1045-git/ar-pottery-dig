@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover" />
-    <meta name="theme-color" content="#0f1a14" />
+    <meta name="theme-color" content="#1a140f" />
     <title>AR 도자기 발굴</title>
   </head>
   <body>
@@ -12,9 +12,8 @@
     <div class="top">
       <header class="topbar">
         <div class="chip" id="src-chip">위치 준비 중…</div>
-        <div class="chip" id="near-chip" hidden></div>
-        <button class="chip chip-btn" id="bag-btn" type="button" aria-label="가방 열기">
-          🎒 <span id="bag-count">0</span>
+        <button class="chip chip-btn" id="dex-btn" type="button" aria-label="도감 열기">
+          🏺 <span id="dex-count">0</span>
         </button>
       </header>
 
@@ -32,10 +31,17 @@
     </div>
 
     <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
-    <div id="fx" class="fx" aria-hidden="true"></div>
 
     <footer class="bottombar">
       <p id="hint" class="hint" hidden></p>
+      <section id="detector" class="detector" aria-label="탐지기">
+        <div class="detector-bars" id="detector-bars" aria-hidden="true">
+          <i></i><i></i><i></i><i></i><i></i>
+        </div>
+        <p class="detector-text" id="detector-text" role="status">탐지기 준비 중…</p>
+        <button id="sound-btn" class="detector-sound" type="button" aria-pressed="true" aria-label="탐지기 소리">🔊</button>
+        <button id="dig-btn" class="dig-btn" type="button" hidden>⛏️ 발굴하기</button>
+      </section>
       <div class="actions">
         <button id="follow-btn" type="button" class="active">📍 내 위치</button>
         <button id="roadview-btn" type="button" hidden>🛣️ 로드뷰</button>
@@ -43,12 +49,13 @@
       </div>
     </footer>
 
-    <section id="bag" class="sheet" aria-label="가방" hidden>
+    <section id="dex" class="sheet" aria-label="도감" hidden>
       <div class="sheet-head">
-        <h2>도감 <small id="bag-progress"></small></h2>
-        <button id="bag-close" type="button" aria-label="닫기">✕</button>
+        <h2>도감 <small id="dex-progress"></small></h2>
+        <button id="dex-close" type="button" aria-label="닫기">✕</button>
       </div>
-      <ul id="bag-list" class="dex"></ul>
+      <p class="dex-dust">고운 흙 <b id="dex-dust">0</b> · 중복 조각을 얻으면 쌓이고, 모자란 조각과 바꿀 수 있어요.</p>
+      <ul id="dex-list" class="vessels"></ul>
       <button id="reset-btn" type="button" class="danger">진행도 초기화</button>
     </section>
 
@@ -59,6 +66,8 @@
       </div>
       <div id="roadview-view"></div>
     </section>
+
+    <section id="dig" class="dig" aria-label="발굴 화면" hidden></section>
 
     <script type="module" src="/src/main.ts"></script>
   </body>

@@ -2,22 +2,24 @@ export const SAVE_VERSION = 1;
 
 export interface SaveData {
   version: typeof SAVE_VERSION;
-  /** 생물 종류별 보유 수. */
-  inventory: Record<string, number>;
-  /** 잡은 스폰 ID → 만료 시각. 만료된 항목은 불러올 때 정리한다. */
-  caught: Record<string, number>;
-  /** 종류별 처음 잡은 시각 (도감). */
-  firstCaughtAt: Record<string, number>;
-  totalCaught: number;
+  /** 조각 ID("celadon:shoulder") → 발굴한 횟수. 1 이상이면 가지고 있다. */
+  shards: Record<string, number>;
+  /** 고운 흙. 중복 조각과 복원 보상으로 모으고, 모자란 조각과 교환한다. */
+  dust: number;
+  /** 판 지점 ID → 만료 시각. 만료된 항목은 불러올 때 정리한다. */
+  dug: Record<string, number>;
+  /** 도자기 ID → 처음 복원한 시각. */
+  restoredAt: Record<string, number>;
+  totalDug: number;
   /** 마지막으로 알던 위치. GPS를 못 받을 때 지도 시작점으로 쓴다. */
   lastKnown?: { lat: number; lng: number; at: number };
 }
 
 export function emptySave(): SaveData {
-  return { version: SAVE_VERSION, inventory: {}, caught: {}, firstCaughtAt: {}, totalCaught: 0 };
+  return { version: SAVE_VERSION, shards: {}, dust: 0, dug: {}, restoredAt: {}, totalDug: 0 };
 }
 
-/** 저장소 추상화. 지금은 localStorage, 나중에 서버로 바꿀 수 있다. */
+/** 저장소 추상화. 지금은 localStorage. */
 export interface SaveStore {
   load(): SaveData | null;
   save(data: SaveData): void;

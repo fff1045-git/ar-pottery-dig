@@ -1,5 +1,4 @@
-import { CREATURES, RARITY_LABEL } from '../game/creatures';
-import type { PlaceResult, ScreenPoint } from '../map/MapProvider';
+import type { PlaceResult } from '../map/MapProvider';
 
 const $ = <T extends HTMLElement = HTMLElement>(sel: string) => document.querySelector<T>(sel)!;
 
@@ -14,21 +13,14 @@ export class Hud {
 
   constructor() {
     $('#banner-close').addEventListener('click', () => ($('#banner').hidden = true));
-    $('#bag-btn').addEventListener('click', () => this.toggleSheet('#bag', true));
-    $('#bag-close').addEventListener('click', () => this.toggleSheet('#bag', false));
+    $('#dex-btn').addEventListener('click', () => this.openDex());
+    $('#dex-close').addEventListener('click', () => this.toggleSheet('#dex', false));
     $('#roadview-close').addEventListener('click', () => this.toggleSheet('#roadview', false));
   }
 
   setSource(text: string, tone: 'ok' | 'warn' | 'error' = 'ok') {
     const el = $('#src-chip');
     el.textContent = text;
-    el.dataset.tone = tone;
-  }
-
-  setNear(text: string | null, tone: 'hot' | 'warn' | '' = '') {
-    const el = $('#near-chip');
-    el.hidden = !text;
-    el.textContent = text ?? '';
     el.dataset.tone = tone;
   }
 
@@ -65,34 +57,13 @@ export class Hud {
     this.toastTimer = setTimeout(() => (el.hidden = true), ms);
   }
 
-  /** 획득한 자리에서 이모지가 튀어 오르는 효과. */
-  pop(emoji: string, at: ScreenPoint) {
-    const el = document.createElement('div');
-    el.className = 'pop';
-    el.textContent = emoji;
-    el.style.left = `${at.x}px`;
-    el.style.top = `${at.y}px`;
-    $('#fx').appendChild(el);
-    el.addEventListener('animationend', () => el.remove());
+  /** 상단 도감 버튼에 보유 조각 수. */
+  setDexCount(owned: number, total: number) {
+    $('#dex-count').textContent = `${owned}/${total}`;
   }
 
-  setInventory(inventory: Readonly<Record<string, number>>, total: number) {
-    $('#bag-count').textContent = String(total);
-    const found = CREATURES.filter((c) => inventory[c.id]).length;
-    $('#bag-progress').textContent = `${found} / ${CREATURES.length}`;
-    $('#bag-list').replaceChildren(
-      ...CREATURES.map((c) => {
-        const n = inventory[c.id] ?? 0;
-        const li = document.createElement('li');
-        li.className = `dex-item ${c.rarity}${n ? '' : ' unseen'}`;
-        li.innerHTML = n
-          ? `<span class="dex-emoji">${c.emoji}</span><span class="dex-name">${c.name}</span>` +
-            `<span class="dex-rarity">${RARITY_LABEL[c.rarity]}</span><span class="dex-count">×${n}</span>`
-          : `<span class="dex-emoji">？</span><span class="dex-name">???</span>` +
-            `<span class="dex-rarity">${RARITY_LABEL[c.rarity]}</span><span class="dex-count"></span>`;
-        return li;
-      }),
-    );
+  openDex() {
+    this.toggleSheet('#dex', true);
   }
 
   onReset(fn: () => void) {

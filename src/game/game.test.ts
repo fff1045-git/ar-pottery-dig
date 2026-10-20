@@ -1,185 +1,303 @@
 import { describe, expect, it } from 'vitest';
 import { distanceMeters, offsetMeters } from '../core/geo';
-import { CREATURES, pickCreature } from './creatures';
+import { addShard, exchangeShard, ownedParts } from './collection';
+import { beepIntervalMs, DEFAULT_DETECTOR_CONFIG, MAX_SIGNAL, signalLevel } from './detector';
+import { Excavation, excavationConfig } from './excavation';
 import { GameState } from './GameState';
-import { checkRange, DEFAULT_CAPTURE_CONFIG } from './rules';
-import { cellOf, DEFAULT_SPAWN_CONFIG, spawnsInCell, spawnsNear, windowIndex } from './spawner';
-import { LocalStorageStore, MemoryStore } from './storage';
+import { cellOf } from './grid';
+import { DUST_FOR_DUPLICATE, EXCHANGE_COST, PARTS, pickPart, pickVessel, RESTORE_BONUS, VESSELS } from './pottery';
+import { checkRange } from './rules';
+import { dayEndsAt, dayIndex, DEFAULT_SITE_CONFIG, sitesInCell, sitesNear } from './sites';
+import { emptySave, LocalStorageStore, MemoryStore } from './storage';
 
 const HERE = { lat: 37.5663, lng: 126.9779 }; // 서울시청
+// 2026-10-18 12:00 KST
 const T0 = Date.UTC(2026, 9, 18, 3, 0, 0);
-const cfg = DEFAULT_SPAWN_CONFIG;
+const DAY = 24 * 60 * 60 * 1000;
+const cfg = DEFAULT_SITE_CONFIG;
 
 function fixAt(pos = HERE, accuracy = 5) {
   return { pos, accuracy, timestamp: T0 };
 }
 
-describe('pickCreature', () => {
-  it('경계값에서 첫/마지막 항목', () => {
-    expect(pickCreature(0).id).toBe(CREATURES[0].id);
-    expect(pickCreature(0.999999).id).toBe(CREATURES[CREATURES.length - 1].id);
+describe('pottery', () => {
+  it('가중치 추첨 경계값', () => {
+    expect(pickVessel(0).id).toBe(VESSELS[0].id);
+    expect(pickVessel(0.999999).id).toBe(VESSELS[VESSELS.length - 1].id);
+    expect(pickPart(0)).toBe('rim');
+    expect(pickPart(0.999999)).toBe('base');
   });
 });
 
-describe('spawner', () => {
-  it('같은 셀·시간창이면 항상 같은 스폰 (결정적)', () => {
-    const cell = cellOf(HERE, cfg);
-    const w = windowIndex(T0, cfg);
-    expect(spawnsInCell(cell, w, cfg)).toEqual(spawnsInCell(cell, w, cfg));
+describe('sites', () => {
+  it('하루 창은 한국 자정에 바뀐다', () => {
+    const midnightKst = Date.UTC(2026, 9, 18, 15, 0, 0); // 10-19 00:00 KST
+    expect(dayIndex(midnightKst - 1)).toBe(dayIndex(T0));
+    expect(dayIndex(midnightKst)).toBe(dayIndex(T0) + 1);
+    expect(dayEndsAt(dayIndex(T0))).toBe(midnightKst);
   });
 
-  it('시간창이 바뀌면 배치가 바뀐다', () => {
-    const a = spawnsNear(HERE, T0, cfg).map((s) => s.id + s.kindId);
-    const b = spawnsNear(HERE, T0 + cfg.windowMs, cfg).map((s) => s.id + s.kindId);
+  it('같은 셀·날짜면 항상 같은 지점 (결정적)', () => {
+    const cell = cellOf(HERE, cfg.cellSizeM);
+    expect(sitesInCell(cell, dayIndex(T0))).toEqual(sitesInCell(cell, dayIndex(T0)));
+  });
+
+  it('날짜가 바뀌면 배치가 바뀐다', () => {
+    const a = sitesNear(HERE, T0).map((s) => s.id + s.vesselId);
+    const b = sitesNear(HERE, T0 + DAY).map((s) => s.id + s.vesselId);
     expect(a).not.toEqual(b);
   });
 
-  it('스폰은 자기 셀 안에 있다', () => {
-    for (const s of spawnsNear(HERE, T0, cfg, 3)) {
-      const [row, col] = s.id.split(':').map(Number);
-      expect(cellOf(s.pos, cfg)).toEqual({ row, col });
+  it('지점은 자기 셀 안에 있고, 탐색 원이 실제 지점을 포함한다', () => {
+    for (let d = 0; d < 10; d++) {
+      for (const s of sitesNear(HERE, T0 + d * DAY, cfg, 2)) {
+        const [row, col] = s.id.split(':').map(Number);
+        expect(cellOf(s.pos, cfg.cellSizeM)).toEqual({ row, col });
+        expect(distanceMeters(s.pos, s.hintCenter)).toBeLessThanOrEqual(cfg.maxHintOffsetM + 0.01);
+        expect(distanceMeters(s.pos, s.hintCenter)).toBeLessThan(cfg.searchRadiusM);
+        expect(s.expiresAt).toBe(dayEndsAt(dayIndex(T0 + d * DAY)));
+      }
     }
   });
 
-  it('셀 크기는 대략 cellSizeM', () => {
-    const cell = cellOf(HERE, cfg);
-    const a = spawnsInCell(cell, 0, { ...cfg, maxPerCell: 0 });
-    expect(a).toEqual([]);
-    // 셀 안 두 꼭짓점 사이 거리는 대각선(≈ 113m)을 넘지 않는다
-    const ss = spawnsNear(HERE, T0, { ...cfg, maxPerCell: 20 }, 0);
-    for (const s of ss) for (const t of ss) {
-      expect(distanceMeters(s.pos, t.pos)).toBeLessThanOrEqual(cfg.cellSizeM * Math.SQRT2 + 0.5);
-    }
-  });
-
-  it('주변 3x3 셀에 평균 maxPerCell/2 마리 정도', () => {
+  it('주변 3x3 셀에 평균 maxPerCell/2 × 9곳 정도', () => {
     let total = 0;
-    for (let i = 0; i < 50; i++) total += spawnsNear(HERE, T0 + i * cfg.windowMs, cfg).length;
-    const avg = total / 50;
-    expect(avg).toBeGreaterThan(9);
-    expect(avg).toBeLessThan(18);
+    for (let i = 0; i < 60; i++) total += sitesNear(HERE, T0 + i * DAY).length;
+    const avg = total / 60;
+    expect(avg).toBeGreaterThan(6);
+    expect(avg).toBeLessThan(12);
+  });
+});
+
+describe('detector', () => {
+  it('범위 밖 0, 발굴 거리 안 최대', () => {
+    expect(signalLevel(Infinity)).toBe(0);
+    expect(signalLevel(DEFAULT_DETECTOR_CONFIG.rangeM + 1)).toBe(0);
+    expect(signalLevel(DEFAULT_DETECTOR_CONFIG.rangeM)).toBe(1);
+    expect(signalLevel(DEFAULT_DETECTOR_CONFIG.digRadiusM)).toBe(MAX_SIGNAL);
+    expect(signalLevel(0)).toBe(MAX_SIGNAL);
+    expect(signalLevel(DEFAULT_DETECTOR_CONFIG.digRadiusM + 0.1)).toBe(MAX_SIGNAL - 1);
+  });
+
+  it('가까울수록 신호가 세다 (단조)', () => {
+    let prev = 0;
+    for (let d = 120; d >= 0; d -= 1) {
+      const l = signalLevel(d);
+      expect(l).toBeGreaterThanOrEqual(prev);
+      prev = l;
+    }
+  });
+
+  it('삐 간격은 신호가 셀수록 짧다', () => {
+    expect(beepIntervalMs(0)).toBe(0);
+    for (let l = 1; l < MAX_SIGNAL; l++) expect(beepIntervalMs(l + 1)).toBeLessThan(beepIntervalMs(l));
+  });
+});
+
+describe('excavation', () => {
+  /** 판 전체를 왼→오 줄무늬로 n번 문지른다. 완료 순간의 회차를 돌려준다. */
+  function sweep(ex: Excavation, passes: number) {
+    for (let p = 0; p < passes; p++) {
+      for (let y = 0.5; y < ex.cfg.rows; y += 1.5) {
+        if (ex.rub(0, y, ex.cfg.cols, y).completed) return p + 1;
+      }
+    }
+    return -1;
+  }
+
+  it('처음엔 아무것도 안 드러나 있다', () => {
+    const ex = new Excavation(excavationConfig(2));
+    expect(ex.progress).toBe(0);
+    expect(ex.topLayerAt(10, 10)).toBe(0);
+    expect(ex.topLayerAt(-1, 0)).toBe(-1);
+  });
+
+  it('맨 위 겹부터 순서대로 깎인다', () => {
+    const ex = new Excavation(excavationConfig(3));
+    const seen: number[] = [];
+    for (let i = 0; i < 200 && ex.topLayerAt(24, 16) < 3; i++) {
+      const r = ex.rub(23, 16.5, 26, 16.5);
+      for (const c of r.cleared) if (c.col === 24 && c.row === 16) seen.push(c.layer);
+    }
+    expect(seen).toEqual([0, 1, 2]);
+  });
+
+  it('처음 뚫린 겹을 한 번만 알린다', () => {
+    const ex = new Excavation(excavationConfig(2));
+    const all: number[] = [];
+    for (let i = 0; i < 100; i++) all.push(...ex.rub(20, 16, 28, 16).brokeThrough);
+    expect(all).toEqual([0, 1]);
+  });
+
+  it('충분히 문지르면 완료되고, 완료는 한 번만 알린다', () => {
+    const ex = new Excavation(excavationConfig(2));
+    expect(sweep(ex, 50)).toBeGreaterThan(0);
+    expect(ex.completed).toBe(true);
+    expect(ex.progress).toBeGreaterThanOrEqual(0.7);
+    expect(ex.rub(0, 16, 48, 16).completed).toBe(false);
+  });
+
+  it('겹이 많을수록 더 오래 걸린다', () => {
+    const passes = [2, 3, 4].map((n) => sweep(new Excavation(excavationConfig(n)), 100));
+    expect(passes[0]).toBeGreaterThan(1);
+    expect(passes[1]).toBeGreaterThan(passes[0]);
+    expect(passes[2]).toBeGreaterThan(passes[1]);
+  });
+
+  it('판 가장자리만 문지르면 완료되지 않는다', () => {
+    const ex = new Excavation(excavationConfig(2));
+    for (let i = 0; i < 100; i++) ex.rub(0, 1, 48, 1);
+    expect(ex.progress).toBe(0);
+  });
+});
+
+describe('collection', () => {
+  const v = VESSELS[0]; // 흔함
+
+  it('새 조각 → 중복은 고운 흙', () => {
+    const d = emptySave();
+    expect(addShard(d, v.id, 'rim', T0)).toMatchObject({ isNew: true, dust: 0, restored: false });
+    expect(addShard(d, v.id, 'rim', T0)).toMatchObject({ isNew: false, dust: DUST_FOR_DUPLICATE[v.rarity] });
+    expect(d.dust).toBe(DUST_FOR_DUPLICATE[v.rarity]);
+    expect(d.shards[`${v.id}:rim`]).toBe(2);
+  });
+
+  it('4조각이 모이면 한 번만 복원 보너스', () => {
+    const d = emptySave();
+    const results = PARTS.map((p) => addShard(d, v.id, p, T0));
+    expect(results.map((r) => r.restored)).toEqual([false, false, false, true]);
+    expect(d.restoredAt[v.id]).toBe(T0);
+    expect(d.dust).toBe(RESTORE_BONUS[v.rarity]);
+    expect(addShard(d, v.id, 'rim', T0).restored).toBe(false);
+  });
+
+  it('고운 흙으로 모자란 조각 교환', () => {
+    const d = emptySave();
+    const cost = EXCHANGE_COST[v.rarity];
+    expect(exchangeShard(d, v.id, 'base', T0)).toMatchObject({ ok: false, reason: 'not-enough-dust' });
+    d.dust = cost;
+    expect(exchangeShard(d, v.id, 'base', T0)).toMatchObject({ ok: true });
+    expect(d.dust).toBe(0);
+    expect(ownedParts(d, v.id)).toEqual(['base']);
+    d.dust = 100;
+    expect(exchangeShard(d, v.id, 'base', T0)).toMatchObject({ ok: false, reason: 'owned' });
+    expect(exchangeShard(d, 'nope', 'base', T0)).toMatchObject({ ok: false, reason: 'unknown' });
+  });
+
+  it('교환으로 마지막 조각을 채우면 복원된다', () => {
+    const d = emptySave();
+    for (const p of PARTS.slice(0, 3)) addShard(d, v.id, p, T0);
+    d.dust = EXCHANGE_COST[v.rarity];
+    expect(exchangeShard(d, v.id, 'base', T0)).toMatchObject({ ok: true, restored: true });
+    expect(d.dust).toBe(RESTORE_BONUS[v.rarity]);
   });
 });
 
 describe('checkRange', () => {
-  it('반경 안이면 ok', () => {
-    expect(checkRange(fixAt(), offsetMeters(HERE, 30, 0), DEFAULT_CAPTURE_CONFIG).ok).toBe(true);
-  });
-
-  it('반경 밖이면 남은 거리를 알려 준다', () => {
-    const r = checkRange(fixAt(), offsetMeters(HERE, 100, 0), DEFAULT_CAPTURE_CONFIG);
+  const rc = { radiusM: 20, maxAccuracyM: 50 };
+  it('반경 안이면 ok, 밖이면 남은 거리', () => {
+    expect(checkRange(fixAt(), offsetMeters(HERE, 15, 0), rc).ok).toBe(true);
+    const r = checkRange(fixAt(), offsetMeters(HERE, 50, 0), rc);
     expect(r).toMatchObject({ ok: false, reason: 'too-far' });
-    if (r.ok === false && r.reason === 'too-far') expect(r.remainingM).toBeCloseTo(60, 0);
+    if (r.ok === false && r.reason === 'too-far') expect(r.remainingM).toBeCloseTo(30, 0);
   });
 
-  it('정확도가 나쁘면 막는다', () => {
-    const r = checkRange(fixAt(HERE, 250), HERE, DEFAULT_CAPTURE_CONFIG);
-    expect(r).toMatchObject({ ok: false, reason: 'poor-accuracy' });
-  });
-
-  it('위치가 없으면 막는다', () => {
-    expect(checkRange(null, HERE, DEFAULT_CAPTURE_CONFIG)).toMatchObject({ reason: 'no-position' });
+  it('정확도가 나쁘거나 위치가 없으면 막는다', () => {
+    expect(checkRange(fixAt(HERE, 80), HERE, rc)).toMatchObject({ reason: 'poor-accuracy' });
+    expect(checkRange(null, HERE, rc)).toMatchObject({ reason: 'no-position' });
   });
 });
 
 describe('GameState', () => {
-  function stateNextToSpawn() {
+  function stateNextToSite() {
     const store = new MemoryStore();
-    const g = new GameState(store, cfg, DEFAULT_CAPTURE_CONFIG, T0);
+    const g = new GameState(store, cfg, DEFAULT_DETECTOR_CONFIG, T0);
     g.setPlayer(fixAt());
-    const target = g.visibleSpawns(T0)[0];
+    const target = g.visibleSites(T0)[0];
     expect(target).toBeDefined();
     g.setPlayer(fixAt(offsetMeters(target.pos, 10, 0)));
     return { g, store, target };
   }
 
-  it('가까이 가면 획득되고 인벤토리에 들어간다', () => {
-    const { g, target } = stateNextToSpawn();
-    const r = g.tryCapture(target.id, T0);
-    expect(r.ok).toBe(true);
-    expect(g.inventory[target.kindId]).toBe(1);
-    expect(g.totalCaught).toBe(1);
-    expect(g.visibleSpawns(T0).some((s) => s.id === target.id)).toBe(false);
+  it('가까운 지점을 탐지기가 가리킨다', () => {
+    const { g, target } = stateNextToSite();
+    expect(g.nearestSite(T0)?.site.id).toBe(target.id);
+    expect(g.nearestSite(T0)!.distanceM).toBeCloseTo(10, 0);
   });
 
-  it('같은 스폰은 두 번 못 잡는다', () => {
-    const { g, target } = stateNextToSpawn();
-    g.tryCapture(target.id, T0);
-    expect(g.tryCapture(target.id, T0)).toMatchObject({ ok: false, reason: 'already-caught' });
+  it('가까이서 파면 조각을 얻고 지점이 사라진다', () => {
+    const { g, target } = stateNextToSite();
+    const r = g.dig(target.id, T0);
+    expect(r).toMatchObject({ ok: true, isNew: true, part: target.part });
+    expect(g.save.shards[`${target.vesselId}:${target.part}`]).toBe(1);
+    expect(g.save.totalDug).toBe(1);
+    expect(g.visibleSites(T0).some((s) => s.id === target.id)).toBe(false);
+    expect(g.dig(target.id, T0)).toMatchObject({ ok: false, reason: 'already-caught' });
   });
 
-  it('멀리서는 못 잡는다', () => {
-    const { g, target } = stateNextToSpawn();
-    g.setPlayer(fixAt(offsetMeters(target.pos, 70, 0)));
-    expect(g.tryCapture(target.id, T0)).toMatchObject({ ok: false, reason: 'too-far' });
-    expect(g.totalCaught).toBe(0);
+  it('멀거나 GPS가 나쁘면 못 판다', () => {
+    const { g, target } = stateNextToSite();
+    g.setPlayer(fixAt(offsetMeters(target.pos, 40, 0)));
+    expect(g.dig(target.id, T0)).toMatchObject({ ok: false, reason: 'too-far' });
+    g.setPlayer(fixAt(target.pos, 80));
+    expect(g.dig(target.id, T0)).toMatchObject({ ok: false, reason: 'poor-accuracy' });
+    expect(g.save.totalDug).toBe(0);
   });
 
-  it('없는 스폰 ID는 거부', () => {
-    const { g } = stateNextToSpawn();
-    expect(g.tryCapture('1:2:3:4', T0).ok).toBe(false);
+  it('없는 지점·날짜가 바뀐 지점은 거부', () => {
+    const { g, target } = stateNextToSite();
+    expect(g.dig('1:2:3:4', T0).ok).toBe(false);
+    expect(g.dig(target.id, T0 + DAY)).toMatchObject({ ok: false, reason: 'expired' });
   });
 
-  it('저장 후 다시 불러오면 진행도가 유지된다', () => {
-    const { g, store, target } = stateNextToSpawn();
-    g.tryCapture(target.id, T0);
-    const g2 = new GameState(store, cfg, DEFAULT_CAPTURE_CONFIG, T0);
-    expect(g2.totalCaught).toBe(1);
-    expect(g2.inventory[target.kindId]).toBe(1);
+  it('저장 후 다시 불러오면 유지되고, 지난 날짜의 판 기록은 정리된다', () => {
+    const { g, store, target } = stateNextToSite();
+    g.dig(target.id, T0);
+    const g2 = new GameState(store, cfg, DEFAULT_DETECTOR_CONFIG, T0);
+    expect(g2.save.totalDug).toBe(1);
+    expect(target.id in g2.save.dug).toBe(true);
+    new GameState(store, cfg, DEFAULT_DETECTOR_CONFIG, T0 + DAY);
+    expect(store.load()!.dug).toEqual({});
+    expect(store.load()!.totalDug).toBe(1);
   });
 
-  it('만료된 포획 기록은 불러올 때 정리된다', () => {
-    const { g, store, target } = stateNextToSpawn();
-    g.tryCapture(target.id, T0);
-    new GameState(store, cfg, DEFAULT_CAPTURE_CONFIG, T0 + cfg.windowMs * 2);
-    expect(Object.keys(store.load()!.caught)).toEqual([]);
-    expect(store.load()!.totalCaught).toBe(1);
+  it('교환은 저장된다', () => {
+    const store = new MemoryStore();
+    const d = emptySave();
+    d.dust = 100;
+    store.save(d);
+    const g = new GameState(store, cfg, DEFAULT_DETECTOR_CONFIG, T0);
+    expect(g.exchange('onggi', 'rim', T0).ok).toBe(true);
+    expect(store.load()!.shards['onggi:rim']).toBe(1);
   });
-});
 
-describe('GameState 플레이 영역·마지막 위치', () => {
-  it('대한민국 밖이면 스폰이 없다', () => {
-    const g = new GameState(new MemoryStore(), cfg, DEFAULT_CAPTURE_CONFIG, T0);
+  it('대한민국 밖이면 지점이 없다', () => {
+    const g = new GameState(new MemoryStore(), cfg, DEFAULT_DETECTOR_CONFIG, T0);
     g.setPlayer(fixAt({ lat: 35.68, lng: 139.69 })); // 도쿄
     expect(g.inPlayArea).toBe(false);
-    expect(g.visibleSpawns(T0)).toEqual([]);
+    expect(g.visibleSites(T0)).toEqual([]);
+    expect(g.nearestSite(T0)).toBeNull();
   });
 
-  it('부산·제주 등 국내 어디서나 스폰된다', () => {
+  it('부산·제주·울릉 등 국내 어디서나 지점이 생긴다', () => {
     for (const pos of [{ lat: 35.1798, lng: 129.075 }, { lat: 33.4996, lng: 126.5312 }, { lat: 37.4844, lng: 130.9057 }]) {
-      const g = new GameState(new MemoryStore(), cfg, DEFAULT_CAPTURE_CONFIG, T0);
+      const g = new GameState(new MemoryStore(), cfg, DEFAULT_DETECTOR_CONFIG, T0);
       g.setPlayer(fixAt(pos));
-      expect(g.inPlayArea).toBe(true);
       let total = 0;
-      for (let i = 0; i < 5; i++) total += g.visibleSpawns(T0 + i * cfg.windowMs).length;
+      for (let i = 0; i < 5; i++) total += g.visibleSites(T0 + i * DAY).length;
       expect(total).toBeGreaterThan(0);
     }
   });
 
-  it('마지막 위치를 저장하고 다시 불러온다', () => {
+  it('마지막 위치: 저장·조금 움직이면 안 씀·초기화해도 남음', () => {
     const store = new MemoryStore();
-    const g = new GameState(store, cfg, DEFAULT_CAPTURE_CONFIG, T0);
+    const g = new GameState(store, cfg, DEFAULT_DETECTOR_CONFIG, T0);
     expect(g.lastKnown).toBeNull();
-    g.setPlayer(fixAt());
-    expect(new GameState(store, cfg, DEFAULT_CAPTURE_CONFIG, T0).lastKnown).toEqual(HERE);
-  });
-
-  it('조금 움직일 때는 마지막 위치를 다시 쓰지 않는다', () => {
-    const store = new MemoryStore();
-    const g = new GameState(store, cfg, DEFAULT_CAPTURE_CONFIG, T0);
     g.setPlayer(fixAt());
     g.setPlayer(fixAt(offsetMeters(HERE, 10, 0)));
     expect(store.load()!.lastKnown).toMatchObject(HERE);
-    g.setPlayer(fixAt(offsetMeters(HERE, 30, 0)));
-    expect(store.load()!.lastKnown!.lat).toBeGreaterThan(HERE.lat);
-  });
-
-  it('진행도 초기화해도 마지막 위치는 남는다', () => {
-    const store = new MemoryStore();
-    const g = new GameState(store, cfg, DEFAULT_CAPTURE_CONFIG, T0);
-    g.setPlayer(fixAt());
     g.reset();
-    expect(new GameState(store, cfg, DEFAULT_CAPTURE_CONFIG, T0).lastKnown).toEqual(HERE);
+    expect(new GameState(store, cfg, DEFAULT_DETECTOR_CONFIG, T0).lastKnown).toEqual(HERE);
   });
 });
 
@@ -195,19 +313,21 @@ describe('LocalStorageStore', () => {
 
   it('저장·불러오기', () => {
     const s = new LocalStorageStore('k', fakeStorage());
-    s.save({ version: 1, inventory: { fox: 2 }, caught: {}, firstCaughtAt: {}, totalCaught: 2 });
-    expect(s.load()?.inventory.fox).toBe(2);
+    s.save({ ...emptySave(), dust: 7, shards: { 'onggi:rim': 2 } });
+    expect(s.load()).toMatchObject({ dust: 7, shards: { 'onggi:rim': 2 } });
   });
 
-  it('손상된 데이터는 null', () => {
+  it('손상되거나 버전이 다르면 null', () => {
     const st = fakeStorage();
     st.setItem('k', '{not json');
+    expect(new LocalStorageStore('k', st).load()).toBeNull();
+    st.setItem('k', JSON.stringify({ version: 99 }));
     expect(new LocalStorageStore('k', st).load()).toBeNull();
   });
 
   it('저장소가 없어도 죽지 않는다', () => {
     const s = new LocalStorageStore('k', undefined);
-    s.save({ version: 1, inventory: {}, caught: {}, firstCaughtAt: {}, totalCaught: 0 });
+    s.save(emptySave());
     expect(s.load()).toBeNull();
   });
 });
