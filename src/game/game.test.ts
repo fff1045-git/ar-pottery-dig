@@ -95,11 +95,13 @@ describe('detector', () => {
 });
 
 describe('excavation', () => {
-  /** 판 전체를 왼→오 줄무늬로 n번 문지른다. 완료 순간의 회차를 돌려준다. */
+  /** 판 전체를 3칸 간격 줄무늬로 문지른다. 완료까지 걸린 획 수(실패면 -1). */
   function sweep(ex: Excavation, passes: number) {
+    let strokes = 0;
     for (let p = 0; p < passes; p++) {
-      for (let y = 0.5; y < ex.cfg.rows; y += 1.5) {
-        if (ex.rub(0, y, ex.cfg.cols, y).completed) return p + 1;
+      for (let y = 1; y < ex.cfg.rows; y += 3) {
+        strokes++;
+        if (ex.rub(0, y, ex.cfg.cols, y).completed) return strokes;
       }
     }
     return -1;
@@ -139,9 +141,18 @@ describe('excavation', () => {
 
   it('겹이 많을수록 더 오래 걸린다', () => {
     const passes = [2, 3, 4].map((n) => sweep(new Excavation(excavationConfig(n)), 100));
-    expect(passes[0]).toBeGreaterThan(1);
+    expect(passes[0]).toBeGreaterThan(10);
     expect(passes[1]).toBeGreaterThan(passes[0]);
     expect(passes[2]).toBeGreaterThan(passes[1]);
+    // 전설(4겹)도 판 전체를 열 번 남짓 훑으면 끝난다
+    expect(passes[2]).toBeLessThan(11 * 10);
+  });
+
+  it('파편 모양을 주면 그 칸들만 진행률에 센다', () => {
+    const ex = new Excavation(excavationConfig(2), (c, r) => r === 5 && c >= 10 && c < 20);
+    for (let i = 0; i < 40 && !ex.completed; i++) ex.rub(8, 5.5, 22, 5.5);
+    expect(ex.completed).toBe(true);
+    expect(ex.topLayerAt(24, 16)).toBe(0); // 가운데는 건드리지 않았다
   });
 
   it('판 가장자리만 문지르면 완료되지 않는다', () => {

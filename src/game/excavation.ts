@@ -2,7 +2,8 @@
  * 발굴 판의 흙. 화면을 모르는 순수 로직이다.
  * 판은 cols×rows 칸이고, 칸마다 흙이 layers겹 쌓여 있다(0이 맨 위).
  * 문지르면 각 칸에서 맨 위에 남은 겹의 단단함이 깎이고, 0이 되면 그 아래 겹이 드러난다.
- * 판 가운데 타원(파편 자리)의 칸이 revealAt 비율 이상 바닥까지 드러나면 발굴 완료.
+ * 파편 자리 칸이 revealAt 비율 이상 바닥까지 드러나면 발굴 완료.
+ * 파편 자리는 기본으로 판 가운데 타원이고, 파편 그림 모양을 알면 그것으로 준다.
  */
 export interface ExcavationConfig {
   cols: number;
@@ -30,7 +31,7 @@ export function excavationConfig(layers: number): ExcavationConfig {
     layers,
     hardness: DEFAULT_HARDNESS,
     brushRadius: 2.6,
-    strength: 0.55,
+    strength: 0.7,
     targetRx: 0.24,
     targetRy: 0.36,
     revealAt: 0.7,
@@ -64,17 +65,27 @@ export class Excavation {
   private readonly broken = new Set<number>();
   private done = false;
 
-  constructor(readonly cfg: ExcavationConfig) {
+  /**
+   * @param target 칸이 파편 자리인지. 없으면 가운데 타원(targetRx·targetRy).
+   */
+  constructor(
+    readonly cfg: ExcavationConfig,
+    target?: (col: number, row: number) => boolean,
+  ) {
     const n = cfg.cols * cfg.rows;
     this.top = new Uint8Array(n);
     this.hp = new Float32Array(n).fill(cfg.hardness[0]);
     this.isTarget = new Uint8Array(n);
+    const inEllipse = (c: number, r: number) => {
+      const dx = (c + 0.5) / cfg.cols - 0.5;
+      const dy = (r + 0.5) / cfg.rows - 0.5;
+      return (dx / cfg.targetRx) ** 2 + (dy / cfg.targetRy) ** 2 <= 1;
+    };
+    const isTarget = target ?? inEllipse;
     let count = 0;
     for (let r = 0; r < cfg.rows; r++) {
       for (let c = 0; c < cfg.cols; c++) {
-        const dx = (c + 0.5) / cfg.cols - 0.5;
-        const dy = (r + 0.5) / cfg.rows - 0.5;
-        if ((dx / cfg.targetRx) ** 2 + (dy / cfg.targetRy) ** 2 <= 1) {
+        if (isTarget(c, r)) {
           this.isTarget[r * cfg.cols + c] = 1;
           count++;
         }

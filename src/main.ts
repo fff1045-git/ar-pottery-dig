@@ -3,8 +3,14 @@ import { readConfig } from './app/config';
 import { distanceMeters, type LatLng } from './core/geo';
 import { KOREA_OVERVIEW } from './core/korea';
 import { Hud } from './app/hud';
-import { creatureById } from './game/creatures';
-import { GameState } from './game/GameState';
+import { DetectorPanel } from './app/detectorUi';
+import { ownedShardCount, renderDex, TOTAL_SHARDS } from './app/dex';
+import { DigScreen, type DigOutcome } from './ar/DigScreen';
+import { ownedParts } from './game/collection';
+import { signalLevel } from './game/detector';
+import { GameState, type DigResult } from './game/GameState';
+import { PART_LABEL, PARTS, RARITY_LABEL, shardImage, vesselById, type Part } from './game/pottery';
+import type { DigSite } from './game/sites';
 import type { PlayerFix } from './game/rules';
 import { LocalStorageStore } from './game/storage';
 import type { LocationSource } from './gps/LocationSource';
@@ -14,7 +20,16 @@ import { Simulator } from './gps/Simulator';
 import { createProvider } from './map/createProvider';
 
 const PLAYER_ID = 'player';
-const SPAWN_PREFIX = 'spawn:';
+const SITE_PREFIX = 'site:';
+
+const SIGNAL_TEXT = [
+  '신호 없음 · 노란 원 쪽으로 걸어가 보세요',
+  '희미한 신호… 원 안을 돌아다녀 보세요',
+  '신호가 잡혀요',
+  '신호가 강해져요!',
+  '아주 가까워요!!',
+  '삐삐삐! 바로 여기예요',
+];
 
 /** 시뮬레이터에서 지도를 눌렀을 때 이보다 멀면 걸어가지 않고 순간이동한다(m). */
 const TELEPORT_OVER_M = 300;
@@ -146,86 +161,120 @@ async function main() {
   if (source.kind === 'gps' && here) onFix(here);
 
   // ── 그리기 ────────────────────────────────────
-  const shown = new Set<string>();
+  const detector = new DetectorPanel();
+  detector.vibrate = source.kind === 'gps';
+  const dig = new DigScreen(document.getElementById('dig')!);
+  const shownSites = new Set<string>();
+  let dexKey = '';
 
-  const capture = (spawnId: string, at: LatLng) => {
-    const r = state.tryCapture(spawnId, Date.now());
-    if (r.ok) {
-      if (r.kind) {
-        hud.toast(`${r.kind.emoji} ${r.kind.name} 획득!`);
-        hud.pop(r.kind.emoji, provider.latLngToScreen(at));
-      }
-      return;
+  const exchange = (vesselId: string, part: Part) => {
+    const r = state.exchange(vesselId, part, Date.now());
+    if (r.ok) hud.toast(r.restored ? `🎉 ${r.vessel.short} 복원 완료!` : `${r.vessel.short} ${PART_LABEL[part]} 조각을 얻었어요`);
+    else if (r.reason === 'not-enough-dust') hud.toast(`고운 흙이 ${r.cost}만큼 필요해요`);
+  };
+
+  const describeDig = (r: DigResult): DigOutcome => {
+    if (!r.ok) {
+      const message =
+        r.reason === 'too-far'
+          ? `지점에서 너무 멀어졌어요 (${Math.ceil(r.remainingM)}m 더 가까이)`
+          : r.reason === 'poor-accuracy'
+            ? `GPS 신호가 약해서 기록하지 못했어요 (±${Math.round(r.accuracyM)}m)`
+            : r.reason === 'expired'
+              ? '날짜가 바뀌어 이 지점이 사라졌어요'
+              : r.reason === 'already-caught'
+                ? '이미 판 자리예요'
+                : '내 위치를 몰라요';
+      return { ok: false, message };
     }
-    switch (r.reason) {
-      case 'too-far':
-        hud.toast(`${Math.ceil(r.remainingM)}m 더 가까이 가야 해요`);
-        break;
-      case 'poor-accuracy':
-        hud.toast(`GPS 신호가 약해서 잡을 수 없어요 (±${Math.round(r.accuracyM)}m)`);
-        break;
-      case 'no-position':
-        hud.toast('아직 내 위치를 몰라요');
-        break;
-      default:
-        hud.toast('이미 사라졌어요');
-    }
+    const lines: string[] = [RARITY_LABEL[r.vessel.rarity]];
+    if (!r.isNew) lines.push(`이미 가진 조각 → 고운 흙 +${r.dust}`);
+    if (r.restored) lines.push(`🎉 ${r.vessel.name} 복원 완료! 고운 흙 +${r.dust}`);
+    else if (r.isNew) lines.push(`${r.vessel.short} 조각 ${ownedParts(state.save, r.vessel.id).length}/${PARTS.length}`);
+    return {
+      ok: true,
+      title: `${r.vessel.name} · ${PART_LABEL[r.part]}`,
+      image: shardImage(r.vessel.id, r.part),
+      badge: r.restored ? '복원!' : r.isNew ? '새 조각' : undefined,
+      lines,
+    };
+  };
+
+  const openDig = (site: DigSite) => {
+    const vessel = vesselById(site.vesselId)!;
+    detector.paused = true;
+    dig.open({
+      layers: site.layers,
+      shardSrc: shardImage(site.vesselId, site.part),
+      fallbackColor: vessel.color,
+      seed: site.id,
+      onComplete: () => describeDig(state.dig(site.id, Date.now())),
+      onShowDex: () => hud.openDex(),
+      onClose: () => {
+        detector.paused = false;
+        render();
+      },
+    });
   };
 
   const render = () => {
     const now = Date.now();
     const player = state.player;
-    hud.setInventory(state.inventory, state.totalCaught);
-    if (!player) return;
+    hud.setDexCount(ownedShardCount(state.save), TOTAL_SHARDS);
+    // 걷는 동안 매번 다시 그리지 않게, 저장 내용이 바뀔 때만 도감을 그린다.
+    const key = `${state.save.dust}|${JSON.stringify(state.save.shards)}|${Object.keys(state.save.restoredAt).length}`;
+    if (key !== dexKey) {
+      dexKey = key;
+      renderDex(state.save, exchange);
+    }
+    if (!player) {
+      detector.set(0, '내 위치를 기다리는 중…');
+      return;
+    }
 
-    const weak = player.accuracy > state.captureConfig.maxAccuracyM;
+    const weak = player.accuracy > state.detectorConfig.maxAccuracyM;
     hud.setSource(
       `${source.kind === 'sim' ? '🕹️ 시뮬레이터' : '📡 GPS'} ±${Math.round(player.accuracy)}m`,
       weak ? 'warn' : 'ok',
     );
     provider.setMarker({ id: PLAYER_ID, pos: player.pos, html: '<div class="player"></div>', zIndex: 100 });
-    provider.setCircle({ id: PLAYER_ID, center: player.pos, radiusM: state.captureConfig.radiusM, color: '#4cc9f0' });
+    provider.setCircle({ id: PLAYER_ID, center: player.pos, radiusM: state.detectorConfig.digRadiusM, color: '#ffd166', fillOpacity: 0.12 });
 
-    const spawns = state.visibleSpawns(now);
     const next = new Set<string>();
-    let inRange = 0;
-    let nearest = Infinity;
-    for (const s of spawns) {
-      const kind = creatureById(s.kindId);
-      if (!kind) continue;
-      const check = state.check(s, now);
-      const hot = check.ok;
-      if (hot) inRange++;
-      if (check.ok) nearest = Math.min(nearest, check.distanceM);
-      else if (check.reason === 'too-far') nearest = Math.min(nearest, check.distanceM);
-
-      const id = SPAWN_PREFIX + s.id;
+    for (const s of state.visibleSites(now)) {
+      const id = SITE_PREFIX + s.id;
       next.add(id);
-      provider.setMarker({
-        id,
-        pos: s.pos,
-        html: `<button class="spawn ${kind.rarity}${hot ? ' hot' : ''}" type="button" aria-label="${kind.name}">${kind.emoji}</button>`,
-        zIndex: hot ? 50 : 10,
-        onClick: () => capture(s.id, s.pos),
-      });
+      provider.setCircle({ id, center: s.hintCenter, radiusM: state.siteConfig.searchRadiusM, color: '#e9c46a', fillOpacity: 0.1 });
     }
-    for (const id of shown) if (!next.has(id)) provider.removeMarker(id);
-    shown.clear();
-    for (const id of next) shown.add(id);
+    for (const id of shownSites) if (!next.has(id)) provider.removeCircle(id);
+    shownSites.clear();
+    for (const id of next) shownSites.add(id);
 
-    if (!state.inPlayArea) hud.setNear('🇰🇷 국내에서만 생물이 나와요', 'warn');
-    else if (inRange) hud.setNear(`✨ 잡을 수 있음 ${inRange}`, 'hot');
-    else if (Number.isFinite(nearest)) hud.setNear(`가장 가까운 생물 ${Math.round(nearest)}m`);
-    else hud.setNear('주변에 생물이 없어요');
+    if (!state.inPlayArea) {
+      detector.set(0, '🇰🇷 국내에서만 발굴할 수 있어요');
+      detector.setDig(null);
+      return;
+    }
+    const near = state.nearestSite(now);
+    const level = signalLevel(near?.distanceM ?? Infinity, state.detectorConfig);
+    const check = near ? state.check(near.site, now) : null;
+    if (check?.ok) {
+      detector.set(level, '삐삐삐! 바로 여기예요');
+      detector.setDig(() => openDig(near!.site));
+    } else {
+      detector.setDig(null);
+      if (check && !check.ok && check.reason === 'poor-accuracy') detector.set(level, `GPS 신호가 약해요 (±${Math.round(check.accuracyM)}m)`);
+      else detector.set(level, SIGNAL_TEXT[level]);
+    }
   };
 
   state.subscribe(render);
   render();
-  // 15분마다 스폰이 바뀌므로 가끔 다시 그린다.
-  setInterval(() => state.tick(Date.now()), 5_000);
+  // 자정에 지점이 바뀌므로 가끔 다시 그린다.
+  setInterval(() => state.tick(Date.now()), 30_000);
 
   hud.onReset(() => {
-    if (confirm('잡은 생물과 도감을 모두 지울까요?')) state.reset();
+    if (confirm('모은 조각·고운 흙·도감을 모두 지울까요?')) state.reset();
   });
 
   if (provider.showStreetView) {
