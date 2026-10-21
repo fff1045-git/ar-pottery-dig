@@ -126,7 +126,25 @@ npm run build
 
 ## Android 앱(APK)
 
-Capacitor로 감쌉니다. appId는 `com.potterydig.app`으로, 기존 게임(`com.gpscollect.app`)과 달라 한 폰에 둘 다 설치됩니다. 진행 상황과 방법은 아래 "확인한 것 / 못 한 것"을 보세요.
+Capacitor로 감쌉니다. appId는 `com.potterydig.app`으로, 기존 게임(`com.gpscollect.app`)과 달라 한 폰에 둘 다 설치됩니다. 앱은 실제 GPS 모드로 시작하고, 아래쪽 🕹️ 버튼으로 시뮬레이터로 바꿀 수 있습니다. iOS는 Mac이 필요해 보류입니다.
+
+준비(처음 한 번): JDK는 Android Studio에 든 것(`C:\Program Files\Android\Android Studio\jbr`), SDK 경로는 `android/local.properties`(git에 안 올라감)에 `sdk.dir=C:/Users/<사용자>/AppData/Local/Android/Sdk`. 카카오 사이트 도메인에 `https://localhost`(앱 WebView 주소)가 등록돼 있어야 앱에서 카카오 지도가 뜹니다.
+
+웹을 빌드해 `android/`에 복사합니다. 웹 코드나 `.env.local`을 바꿀 때마다 다시 실행합니다.
+
+```bash
+npm run android:sync
+```
+
+디버그 APK 만들기 (PowerShell):
+
+```powershell
+$env:JAVA_HOME = "C:\Program Files\Android\Android Studio\jbr"; .\android\gradlew.bat -p android assembleDebug
+```
+
+결과물은 `android/app/build/outputs/apk/debug/app-debug.apk`입니다. USB 디버깅으로 `adb install -r <apk>` 하거나, 파일을 휴대폰에 옮겨 설치합니다(출처를 알 수 없는 앱 허용).
+
+앱 권한: 정밀 위치(20m 발굴 판정에 필요), 카메라(발굴 화면, 처음 열 때 물음), 진동, 인터넷.
 
 ## 확인한 것 / 못 한 것 (2026-10-21)
 
@@ -135,7 +153,9 @@ Capacitor로 감쌉니다. appId는 `com.potterydig.app`으로, 기존 게임(`c
 - 발굴 화면: 카메라가 막힌 환경에서 흙바닥 그림 대체와 안내, 마우스로 문질러 3겹을 차례로 걷어냄, 70%에서 파편 공개와 결과 카드.
 - 도감에 조각 표시, 새로고침 후 조각·판 지점 기록 유지, 판 지점은 지도에서 사라짐.
 - 휴대폰 폭(375px) 지도 화면 배치, 단위 테스트, `npm run build`.
+- Android 에뮬레이터: 디버그 APK 설치·실행, 앱 안에서 카카오 위성 지도, 실제 GPS 모드에서 탐지기 패널 표시.
 
 못 함 (실기기 필요):
-- 실제 후면 카메라 영상, 기울기(자이로) 연출, 진동, 터치 문지르기 손맛, 실제 GPS로 걸어서 찾기.
+- 실제 후면 카메라 영상(앱·HTTPS 모두), 기울기(자이로) 연출, 진동, 터치 문지르기 손맛, 실제 GPS로 걸어서 찾기.
+- 앱 안에서 발굴 화면까지 들어가 보는 것(에뮬레이터에서는 지도 화면까지만 확인).
 - 탐지기 소리는 코드만 있고 귀로 확인하지 않았습니다.
