@@ -232,7 +232,7 @@ export class DigScreen {
       if (r.brokeThrough.length) navigator.vibrate?.(30);
       if (r.cleared.length) crumbs(patch, (p.x / cols) * 100, (p.y / rows) * 100, layerColor(r.cleared[0].layer));
       last = p;
-      meter.style.setProperty('--p', String(Math.min(1, ex.progress / ex.cfg.revealAt)));
+      meter.style.setProperty('--p', String(ex.meter));
       if (r.completed) finish();
     };
     const finish = () => {

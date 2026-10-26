@@ -62,6 +62,9 @@ export class Excavation {
   private readonly isTarget: Uint8Array;
   private readonly targetCount: number;
   private targetCleared = 0;
+  /** 파편 자리 칸들에서 깎아 낸 단단함의 합. 진행 막대용. */
+  private targetWork = 0;
+  private readonly targetWorkTotal: number;
   private readonly broken = new Set<number>();
   private done = false;
 
@@ -92,11 +95,22 @@ export class Excavation {
       }
     }
     this.targetCount = count;
+    const perCell = cfg.hardness.slice(0, cfg.layers).reduce((a, b) => a + b, 0);
+    this.targetWorkTotal = count * perCell * cfg.revealAt;
   }
 
   /** 파편 자리 중 바닥까지 드러난 비율 0..1. */
   get progress(): number {
     return this.targetCount ? this.targetCleared / this.targetCount : 1;
+  }
+
+  /**
+   * 진행 막대 0..1. 바닥까지 드러난 칸만 세는 progress와 달리 덜 깎인 겹도 반영해서,
+   * 첫 겹을 걷어내는 동안에도 막대가 찬다. 완료 전에는 0.95를 넘지 않는다.
+   */
+  get meter(): number {
+    if (this.done) return 1;
+    return this.targetWorkTotal ? Math.min(0.95, this.targetWork / this.targetWorkTotal) : 0;
   }
 
   get completed(): boolean {
@@ -142,7 +156,9 @@ export class Excavation {
         const i = r * cols + c;
         const layer = this.top[i];
         if (layer >= layers) continue;
-        this.hp[i] -= amount * (1 - d / R);
+        const hit = amount * (1 - d / R);
+        if (this.isTarget[i]) this.targetWork += Math.min(hit, this.hp[i]);
+        this.hp[i] -= hit;
         if (this.hp[i] > 0) continue;
         cleared.push({ col: c, row: r, layer });
         if (!this.broken.has(layer)) {

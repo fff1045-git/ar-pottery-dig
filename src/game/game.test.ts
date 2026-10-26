@@ -155,6 +155,21 @@ describe('excavation', () => {
     expect(ex.topLayerAt(24, 16)).toBe(0); // 가운데는 건드리지 않았다
   });
 
+  it('진행 막대는 첫 겹을 깎는 동안에도 차고, 완료 때 1', () => {
+    const ex = new Excavation(excavationConfig(3));
+    for (let y = 1; y < 32; y += 3) ex.rub(0, y, 48, y);
+    expect(ex.progress).toBe(0); // 아직 바닥까지 드러난 칸은 없다
+    expect(ex.meter).toBeGreaterThan(0.1);
+    expect(ex.meter).toBeLessThan(0.95);
+    let prev = ex.meter;
+    for (let i = 0; i < 200 && !ex.completed; i++) {
+      ex.rub(0, (i * 3) % 32, 48, (i * 3) % 32);
+      expect(ex.meter).toBeGreaterThanOrEqual(prev);
+      prev = ex.meter;
+    }
+    expect(ex.meter).toBe(1);
+  });
+
   it('판 가장자리만 문지르면 완료되지 않는다', () => {
     const ex = new Excavation(excavationConfig(2));
     for (let i = 0; i < 100; i++) ex.rub(0, 1, 48, 1);
