@@ -96,7 +96,7 @@ export class Excavation {
     }
     this.targetCount = count;
     const perCell = cfg.hardness.slice(0, cfg.layers).reduce((a, b) => a + b, 0);
-    this.targetWorkTotal = count * perCell * cfg.revealAt;
+    this.targetWorkTotal = count * perCell;
   }
 
   /** 파편 자리 중 바닥까지 드러난 비율 0..1. */

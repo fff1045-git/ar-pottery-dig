@@ -124,6 +124,14 @@ describe('excavation', () => {
     expect(seen).toEqual([0, 1, 2]);
   });
 
+  it('2겹: 맨 위 겹만 다 걷었을 때 막대는 절반 언저리', () => {
+    const ex = new Excavation(excavationConfig(2));
+    for (let i = 0; i < 400 && ex.topLayerAt(24, 16) < 1; i++) ex.rub(0, (i * 3) % 32 + 1, 48, (i * 3) % 32 + 1);
+    expect(ex.completed).toBe(false);
+    expect(ex.meter).toBeGreaterThan(0.3);
+    expect(ex.meter).toBeLessThan(0.75);
+  });
+
   it('처음 뚫린 겹을 한 번만 알린다', () => {
     const ex = new Excavation(excavationConfig(2));
     const all: number[] = [];
@@ -160,7 +168,8 @@ describe('excavation', () => {
     for (let y = 1; y < 32; y += 3) ex.rub(0, y, 48, y);
     expect(ex.progress).toBe(0); // 아직 바닥까지 드러난 칸은 없다
     expect(ex.meter).toBeGreaterThan(0.1);
-    expect(ex.meter).toBeLessThan(0.95);
+    // 3겹 중 맨 위 한 겹 남짓 → 막대도 절반이 안 된다 (에뮬레이터에서 한 번에 95%까지 차던 문제)
+    expect(ex.meter).toBeLessThan(0.5);
     let prev = ex.meter;
     for (let i = 0; i < 200 && !ex.completed; i++) {
       ex.rub(0, (i * 3) % 32, 48, (i * 3) % 32);
