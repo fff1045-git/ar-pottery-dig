@@ -430,6 +430,8 @@ body.digging .top, body.digging .bottombar { display: none; }
 }
 .dig-patch {
   position: relative;
+  /* 폭 최대값은 DigScreen.ts의 PATCH_MAX_CSS_W와 같게. 높이는 aspect-ratio(칸 비율)로 정해진다. */
+  width: min(92vw, 520px);
   filter: drop-shadow(0 18px 24px rgba(0, 0, 0, 0.55));
   cursor: grab;
 }

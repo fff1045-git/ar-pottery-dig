@@ -32,6 +32,8 @@ const LAYER_STYLE = [
 ];
 
 const MAX_DPR = 2;
+/** 흙더미 판의 최대 표시 폭(CSS px). styles.css의 .dig-patch width와 맞출 것. */
+const PATCH_MAX_CSS_W = 520;
 
 /**
  * AR 발굴 화면. 후면 카메라 영상(없으면 흙바닥 그림) 위에 흙더미 판을 띄우고,
@@ -142,13 +144,12 @@ export class DigScreen {
     const { cols, rows } = cfg;
     // 파편 그림을 불러온 뒤 그 모양으로 파편 자리를 정한다. 그 전까지는 문질러도 반응하지 않는다.
     let ex: Excavation | null = null;
-    const cssW = Math.min(window.innerWidth * 0.92, 520);
-    const cssH = cssW / (cols / rows);
+    // 화면 크기는 CSS가 정한다(.dig-patch). 여는 순간 창 너비가 0이면(백그라운드에서 열림 등)
+    // 판이 0×0이 되던 문제가 있어서, 캔버스 해상도는 최대 표시 폭 기준으로 고정한다.
     const dpr = Math.min(window.devicePixelRatio || 1, MAX_DPR);
-    const W = Math.round(cssW * dpr);
-    const H = Math.round(cssH * dpr);
-    patch.style.width = `${cssW}px`;
-    patch.style.height = `${cssH}px`;
+    const W = Math.round(PATCH_MAX_CSS_W * dpr);
+    const H = Math.round((W * rows) / cols);
+    patch.style.aspectRatio = `${cols} / ${rows}`;
     const cw = W / cols;
     const ch = H / rows;
     const rand = seededRandom(opts.seed);
@@ -186,18 +187,30 @@ export class DigScreen {
       layers[k] = ctx;
     }
 
+    /**
+     * 다 깎인 칸 자리의 흙을 지운다. 칸마다 같은 원을 찍으면 격자 모양이 드러나서,
+     * 칸별로 정해진(시드) 크기·위치·찌그러짐이 다른 흙덩이 두 개를 지워 가장자리를 울퉁불퉁하게 만든다.
+     */
     const eraseCell = (c: ClearedCell) => {
       const ctx = layers[c.layer];
-      const x = (c.col + 0.5) * cw;
-      const y = (c.row + 0.5) * ch;
-      const r = cw * 1.35;
-      const g = ctx.createRadialGradient(x, y, 0, x, y, r);
-      g.addColorStop(0, 'rgba(0,0,0,1)');
-      g.addColorStop(0.6, 'rgba(0,0,0,0.85)');
-      g.addColorStop(1, 'rgba(0,0,0,0)');
+      const jitter = seededRandom(`${opts.seed}:${c.layer}:${c.col}:${c.row}`);
       ctx.globalCompositeOperation = 'destination-out';
-      ctx.fillStyle = g;
-      ctx.fillRect(x - r, y - r, r * 2, r * 2);
+      for (let i = 0; i < 2; i++) {
+        const x = (c.col + 0.5 + (jitter() - 0.5) * 0.9) * cw;
+        const y = (c.row + 0.5 + (jitter() - 0.5) * 0.9) * ch;
+        const r = cw * (0.9 + jitter() * 0.8);
+        ctx.save();
+        ctx.translate(x, y);
+        ctx.rotate(jitter() * Math.PI);
+        ctx.scale(1, 0.6 + jitter() * 0.4);
+        const g = ctx.createRadialGradient(0, 0, 0, 0, 0, r);
+        g.addColorStop(0, 'rgba(0,0,0,1)');
+        g.addColorStop(0.55, 'rgba(0,0,0,0.9)');
+        g.addColorStop(1, 'rgba(0,0,0,0)');
+        ctx.fillStyle = g;
+        ctx.fillRect(-r, -r, r * 2, r * 2);
+        ctx.restore();
+      }
       ctx.globalCompositeOperation = 'source-over';
     };
 
