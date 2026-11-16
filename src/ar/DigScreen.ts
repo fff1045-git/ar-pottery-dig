@@ -5,7 +5,7 @@ import { groundVisibility, requestTiltPermission, watchTilt } from './tilt';
 
 /** 발굴을 마쳤을 때 main이 돌려주는 결과(GameState.dig 결과를 글로 바꾼 것). */
 export type DigOutcome =
-  | { ok: true; title: string; lines: string[]; image: string; badge?: string }
+  | { ok: true; title: string; lines: string[]; image: string; badge?: string; restored?: boolean }
   | { ok: false; message: string };
 
 export interface DigOptions {
@@ -276,7 +276,8 @@ export class DigScreen {
     el.hidden = false;
     el.replaceChildren();
     const card = document.createElement('div');
-    card.className = `dig-card${outcome.ok ? '' : ' fail'}`;
+    card.className = `dig-card${outcome.ok ? (outcome.restored ? ' restored' : '') : ' fail'}`;
+    if (outcome.ok && outcome.restored) navigator.vibrate?.([80, 60, 80, 60, 200]);
     if (outcome.ok) {
       const img = document.createElement('img');
       img.src = outcome.image;

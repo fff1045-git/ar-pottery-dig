@@ -9,7 +9,7 @@ import { DigScreen, type DigOutcome } from './ar/DigScreen';
 import { ownedParts } from './game/collection';
 import { signalLevel } from './game/detector';
 import { GameState, type DigResult } from './game/GameState';
-import { PART_LABEL, PARTS, RARITY_LABEL, shardImage, vesselById, type Part } from './game/pottery';
+import { PART_LABEL, PARTS, RARITY_LABEL, shardImage, vesselById, vesselImage, type Part } from './game/pottery';
 import type { DigSite } from './game/sites';
 import type { PlayerFix } from './game/rules';
 import { LocalStorageStore } from './game/storage';
@@ -187,15 +187,25 @@ async function main() {
                 : '내 위치를 몰라요';
       return { ok: false, message };
     }
+    if (r.restored) {
+      // 마지막 조각으로 도자기가 완성된 순간: 조각 대신 완성품을 크게 보여 준다.
+      return {
+        ok: true,
+        restored: true,
+        title: `${r.vessel.name} 복원 완료!`,
+        image: vesselImage(r.vessel.id),
+        badge: `${RARITY_LABEL[r.vessel.rarity]} · ${PARTS.length}조각 완성`,
+        lines: [`마지막 조각: ${PART_LABEL[r.part]}`, `복원 보상 고운 흙 +${r.dust}`],
+      };
+    }
     const lines: string[] = [RARITY_LABEL[r.vessel.rarity]];
     if (!r.isNew) lines.push(`이미 가진 조각 → 고운 흙 +${r.dust}`);
-    if (r.restored) lines.push(`🎉 ${r.vessel.name} 복원 완료! 고운 흙 +${r.dust}`);
-    else if (r.isNew) lines.push(`${r.vessel.short} 조각 ${ownedParts(state.save, r.vessel.id).length}/${PARTS.length}`);
+    else lines.push(`${r.vessel.short} 조각 ${ownedParts(state.save, r.vessel.id).length}/${PARTS.length}`);
     return {
       ok: true,
       title: `${r.vessel.name} · ${PART_LABEL[r.part]}`,
       image: shardImage(r.vessel.id, r.part),
-      badge: r.restored ? '복원!' : r.isNew ? '새 조각' : undefined,
+      badge: r.isNew ? '새 조각' : undefined,
       lines,
     };
   };

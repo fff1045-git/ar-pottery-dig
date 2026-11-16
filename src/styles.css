@@ -497,6 +497,26 @@ body.digging .top, body.digging .bottombar { display: none; }
 }
 .dig-card.fail { border-color: var(--warn); }
 .dig-card img { width: 160px; height: 160px; object-fit: contain; filter: drop-shadow(0 6px 12px rgba(0, 0, 0, 0.5)); }
+/* 도자기 복원 완료: 완성품을 크게, 뒤에서 금빛이 퍼지며 천천히 떠오른다. */
+.dig-card.restored {
+  border-color: var(--hot);
+  background: radial-gradient(circle at 50% 30%, rgba(255, 209, 102, 0.28), var(--panel-solid) 62%);
+  box-shadow: 0 0 0 1px rgba(255, 209, 102, 0.5), 0 0 40px rgba(255, 209, 102, 0.35);
+}
+.dig-card.restored img {
+  width: 220px;
+  height: 220px;
+  animation: restore-rise 1.2s ease-out both, restore-glow 2.4s ease-in-out 1.2s infinite;
+}
+.dig-card.restored h3 { font-size: 20px; color: var(--hot); }
+@keyframes restore-rise {
+  from { transform: translateY(24px) scale(0.7); opacity: 0; filter: brightness(2) drop-shadow(0 0 30px #ffd166); }
+  to { transform: none; opacity: 1; filter: drop-shadow(0 0 18px rgba(255, 209, 102, 0.6)); }
+}
+@keyframes restore-glow {
+  0%, 100% { filter: drop-shadow(0 0 14px rgba(255, 209, 102, 0.45)); }
+  50% { filter: drop-shadow(0 0 26px rgba(255, 209, 102, 0.8)); }
+}
 .dig-card h3 { margin: 8px 0 4px; font-size: 18px; }
 .dig-card p { margin: 4px 0; color: var(--muted); }
 .dig-badge {
