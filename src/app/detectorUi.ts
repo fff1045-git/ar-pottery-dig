@@ -94,7 +94,8 @@ export class DetectorPanel {
   }
 }
 
-function readSoundPref(): boolean {
+/** 🔊/🔇 설정. 탐지기와 발굴 화면 소리가 같이 따른다. */
+export function readSoundPref(): boolean {
   try {
     return localStorage.getItem(SOUND_KEY) !== '0';
   } catch {

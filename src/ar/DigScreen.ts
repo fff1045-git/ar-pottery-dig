@@ -1,6 +1,7 @@
 import { seededRandom } from '../core/random';
 import { Excavation, excavationConfig, type ClearedCell } from '../game/excavation';
 import { CAMERA_FAILURE_TEXT, openBackCamera, stopStream } from './camera';
+import { DigSound } from './digSound';
 import { groundVisibility, requestTiltPermission, watchTilt } from './tilt';
 
 /** 발굴을 마쳤을 때 main이 돌려주는 결과(GameState.dig 결과를 글로 바꾼 것). */
@@ -41,6 +42,7 @@ const PATCH_MAX_CSS_W = 520;
  */
 export class DigScreen {
   private cleanup: (() => void)[] = [];
+  private sound: DigSound | null = null;
 
   constructor(private readonly root: HTMLElement) {}
 
@@ -52,6 +54,13 @@ export class DigScreen {
     this.close();
     // iOS 기울기 권한은 탭 처리 중에 바로 물어야 한다(await 전에).
     const tiltPermission = requestTiltPermission();
+    // 오디오도 탭 처리 중에 켜야 브라우저가 막지 않는다.
+    const sound = new DigSound();
+    this.sound = sound;
+    this.cleanup.push(() => {
+      sound.close();
+      if (this.sound === sound) this.sound = null;
+    });
 
     const root = this.root;
     root.innerHTML = `
@@ -240,9 +249,14 @@ export class DigScreen {
       if (!ex) return;
       const from = last ?? p;
       scuff(ex, from.x, from.y, p.x, p.y);
+      const layerHere = ex.topLayerAt(Math.floor(p.x), Math.floor(p.y));
       const r = ex.rub(from.x, from.y, p.x, p.y);
       r.cleared.forEach(eraseCell);
-      if (r.brokeThrough.length) navigator.vibrate?.(30);
+      if (layerHere >= 0 && layerHere < opts.layers) this.sound?.scrape(layerHere, Math.hypot(p.x - from.x, p.y - from.y));
+      if (r.brokeThrough.length) {
+        navigator.vibrate?.(30);
+        this.sound?.crack();
+      }
       if (r.cleared.length) crumbs(patch, (p.x / cols) * 100, (p.y / rows) * 100, layerColor(r.cleared[0].layer));
       last = p;
       meter.style.setProperty('--p', String(ex.meter));
@@ -278,6 +292,7 @@ export class DigScreen {
     const card = document.createElement('div');
     card.className = `dig-card${outcome.ok ? (outcome.restored ? ' restored' : '') : ' fail'}`;
     if (outcome.ok && outcome.restored) navigator.vibrate?.([80, 60, 80, 60, 200]);
+    if (outcome.ok) this.sound?.reveal(outcome.restored);
     if (outcome.ok) {
       const img = document.createElement('img');
       img.src = outcome.image;
